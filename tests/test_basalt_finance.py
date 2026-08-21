@@ -95,3 +95,8 @@ def test_http_approval_and_controlled_execution_path() -> None:
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "APPROVED"
+    intent_id = approved.json()["intent_id"]
+    assert intent_id is not None
+    executed = client.post(f"/v1/intents/{intent_id}/execute", headers=TOKEN_HEADERS)
+    assert executed.status_code == 200
+    assert executed.json()["status"] == "VERIFIED"

@@ -7,7 +7,7 @@ from uuid import UUID
 from basalt_finance.governance.contracts import ExecutionIntent
 from basalt_finance.governance.engine import GovernanceEngine, Policy, ToolRegistry
 from basalt_finance.integrations.adapters import VaultEqAdapter, ZeroCloseAdapter
-from basalt_finance.integrations.basalt_os import BasaltOSControlPlane
+from basalt_finance.integrations.basalt_os import BasaltAdmission, BasaltOSControlPlane
 
 
 class RuntimeState:
@@ -28,7 +28,8 @@ class RuntimeState:
             self.registry,
         )
         self.intents: dict[UUID, ExecutionIntent] = {}
-        self.admissions: dict[UUID, object] = {}
+        self.admissions: dict[UUID, BasaltAdmission] = {}
+        self.pending_by_approval: dict[UUID, UUID] = {}
         self.basalt_os = BasaltOSControlPlane(sqlite_path=os.getenv("BASALT_FINANCE_CONTROL_DB", ":memory:"))
         self.ledger: VaultEqAdapter | None = None
         self.treasury: ZeroCloseAdapter | None = None

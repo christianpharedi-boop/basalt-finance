@@ -128,6 +128,9 @@ def admit_proposal(
             explanation=hardened.decision.explanation,
             risk_score=hardened.decision.risk_score,
         )
+    state.admissions[proposal.proposal_id] = hardened
+    if hardened.approval is not None:
+        state.pending_by_approval[hardened.approval.approval_id] = proposal.proposal_id
     intent = state.engine.create_intent(proposal, finance_decision)
     if intent is not None:
         state.intents[intent.intent_id] = intent
@@ -153,12 +156,30 @@ def decide_approval(
         approval = state.basalt_os.decide_approval(approval_id, payload.approver_id, payload.approve, payload.reason)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"code": "APPROVAL_REJECTED", "message": str(exc)}) from exc
+    intent_id: UUID | None = None
+    if approval.status.value == "APPROVED":
+        proposal_id = state.pending_by_approval.pop(approval_id, None)
+        admission = state.admissions.get(proposal_id) if proposal_id else None
+        if admission is not None:
+            assert proposal_id is not None
+            authorized = state.basalt_os.authorize_after_approval(admission)
+            intent = ExecutionIntent(
+                proposal_id=proposal_id,
+                action=authorized.request.action,
+                resource=authorized.request.resource,
+                amount=authorized.request.amount,
+                currency=authorized.request.currency,
+            )
+            state.intents[intent.intent_id] = intent
+            state.admissions[intent.intent_id] = authorized
+            intent_id = intent.intent_id
     return {
         "approval_id": str(approval.approval_id),
         "action_request_id": str(approval.action_request_id),
         "status": approval.status.value,
         "approver_id": approval.approver_id,
         "reason": approval.reason,
+        "intent_id": str(intent_id) if intent_id else None,
     }
 
 
@@ -172,7 +193,7 @@ def execute_intent(
     admission = state.admissions.get(intent_id)
     if admission is None:
         raise HTTPException(status_code=404, detail={"code": "ADMISSION_NOT_FOUND"})
-    outcome = state.basalt_os.execute(admission)  # type: ignore[arg-type]
+    outcome = state.basalt_os.execute(admission)
     return {
         "status": outcome.status,
         "payment": outcome.result.__dict__ if outcome.result else None,

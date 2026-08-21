@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from basalt.approval.core import ApprovalRequest, ApprovalService
+from basalt.approval.core import ApprovalRequest, ApprovalService, ApprovalStatus
 from basalt.audit.core import AuditEvent, AuditRepository
 from basalt.domain import (
     ActionRequest,
@@ -139,6 +140,15 @@ class BasaltOSControlPlane:
             )
         )
         return BasaltAdmission(request, identity, self.passport, decision, approval, lifecycle)
+
+    def authorize_after_approval(self, admission: BasaltAdmission) -> BasaltAdmission:
+        """Promote a REQUIRE_APPROVAL admission after its approval is APPROVED."""
+        if admission.approval is None:
+            raise PermissionError("admission has no associated approval")
+        if admission.approval.status is not ApprovalStatus.APPROVED:
+            raise PermissionError("associated approval is not approved")
+        promoted_decision = dataclasses.replace(admission.decision, decision=Decision.ALLOW)
+        return dataclasses.replace(admission, decision=promoted_decision)
 
     def decide_approval(self, approval_id: UUID, approver_id: str, approve: bool, reason: str) -> ApprovalRequest:
         approval = self.approvals.decide(approval_id, approver_id, approve, reason)
