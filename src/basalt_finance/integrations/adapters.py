@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -17,7 +19,7 @@ class VaultEqAdapter:
 
     def __init__(self, organization_id: str, db_path: str = ":memory:", base_currency: str = "ZAR") -> None:
         try:
-            from vaulteq.ledger import (  # type: ignore[import-not-found]
+            from vaulteq.ledger import (
                 AccountType,
                 Direction,
                 LedgerEngine,
@@ -36,9 +38,21 @@ class VaultEqAdapter:
 
         accounts = {account["code"] for account in self.engine.list_accounts(self.organization_id)}
         if "1000" not in accounts:
-            self.engine.create_account(self.organization_id, "1000", "Controlled Cash", self._account_type.ASSET, self._direction.DEBIT)
+            self.engine.create_account(
+                self.organization_id,
+                "1000",
+                "Controlled Cash",
+                self._account_type.ASSET,
+                self._direction.DEBIT,
+            )
         if "4000" not in accounts:
-            self.engine.create_account(self.organization_id, "4000", "Controlled Revenue", self._account_type.REVENUE, self._direction.CREDIT)
+            self.engine.create_account(
+                self.organization_id,
+                "4000",
+                "Controlled Revenue",
+                self._account_type.REVENUE,
+                self._direction.CREDIT,
+            )
         minor_units = int(intent.amount * 100)
         result = self.engine.post(
             PostRequest(
@@ -67,7 +81,7 @@ class ZeroCloseAdapter:
 
     def __init__(self, organization_id: str, *, ledger: Any | None = None) -> None:
         try:
-            from zeroclose.agent import TreasuryAgent  # type: ignore[import-not-found]
+            from zeroclose.agent import TreasuryAgent
         except ImportError as exc:
             raise RuntimeError("Install the user's ZeroClose package before enabling this adapter") from exc
         self.agent = TreasuryAgent(organization_id, ledger=ledger)
@@ -93,3 +107,39 @@ class ZeroCloseAdapter:
 
     def verify_settlement(self, instruction_id: UUID) -> bool:
         return self.agent.status()["always_closed"] is True
+
+
+class SureCloseAdapter(ZeroCloseAdapter):
+    """Optional insurance and operational workflow adapter from SureClose."""
+
+    def __init__(self, organization_id: str, *, ledger: Any | None = None) -> None:
+        try:
+            from zeroclose.agent import SureCloseAgent
+        except ImportError as exc:
+            raise RuntimeError("Install the user's SureClose package before enabling this adapter") from exc
+        self.agent = SureCloseAgent(organization_id, ledger=ledger)
+
+
+class ProvenanceAdapter:
+    """Create and verify deterministic evidence envelopes for integration outputs."""
+
+    @staticmethod
+    def seal(event_type: str, payload: dict[str, Any], previous_hash: str = "GENESIS") -> dict[str, Any]:
+        envelope = {"event_type": event_type, "payload": payload, "previous_hash": previous_hash}
+        canonical = json.dumps(envelope, sort_keys=True, default=str).encode()
+        envelope["hash"] = hashlib.sha256(canonical).hexdigest()
+        return envelope
+
+    @staticmethod
+    def verify_chain(events: list[dict[str, Any]]) -> bool:
+        previous = "GENESIS"
+        for event in events:
+            expected = ProvenanceAdapter.seal(
+                str(event["event_type"]),
+                dict(event["payload"]),
+                str(event["previous_hash"]),
+            )["hash"]
+            if event.get("previous_hash") != previous or event.get("hash") != expected:
+                return False
+            previous = str(event["hash"])
+        return True
