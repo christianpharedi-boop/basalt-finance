@@ -7,12 +7,14 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from basalt_finance.governance.contracts import (
     AgentProposal,
+    Decision,
     ExecutionIntent,
     GovernanceDecision,
+    ReasonCode,
 )
 from basalt_finance.protocols.a2a.server import router as a2a_router
 from basalt_finance.runtime import state
@@ -29,6 +31,13 @@ class AuthenticatedPrincipal(BaseModel):
 class AdmissionResponse(BaseModel):
     decision: GovernanceDecision
     intent: ExecutionIntent | None = None
+    approval_id: UUID | None = None
+
+
+class ApprovalDecisionInput(BaseModel):
+    approver_id: str
+    approve: bool
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class AgentCard(BaseModel):
@@ -60,7 +69,11 @@ def authenticate(authorization: str | None = Header(default=None)) -> Authentica
     expected = os.getenv("BASALT_FINANCE_DEV_TOKEN", "basalt-finance-development-token")
     if token != expected:
         raise HTTPException(status_code=401, detail={"code": "AUTHENTICATION_FAILED"})
-    return AuthenticatedPrincipal(agent_id="treasury-agent-042", tenant_id="example-bank", scopes=frozenset({"proposal:admit"}))
+    return AuthenticatedPrincipal(
+        agent_id="treasury-agent-042",
+        tenant_id="example-bank",
+        scopes=frozenset({"proposal:admit", "approval:decide", "intent:execute", "intent:settle"}),
+    )
 
 
 @asynccontextmanager
@@ -96,11 +109,76 @@ def admit_proposal(
         raise HTTPException(status_code=403, detail={"code": "SCOPE_REQUIRED"})
     if proposal.agent_id != principal.agent_id:
         raise HTTPException(status_code=403, detail={"code": "IDENTITY_MISMATCH"})
-    decision = state.engine.evaluate(proposal, principal.tenant_id)
-    intent = state.engine.create_intent(proposal, decision)
+    finance_decision = state.engine.evaluate(proposal, principal.tenant_id)
+    try:
+        hardened = state.basalt_os.admit_authenticated(proposal, principal.agent_id, principal.tenant_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"code": "BASALT_OS_IDENTITY_REJECTED", "message": str(exc)}) from exc
+    if hardened.decision.decision.value != finance_decision.decision.value:
+        finance_decision = GovernanceDecision(
+            decision=Decision(hardened.decision.decision.value),
+            reason_code=ReasonCode(hardened.decision.reason_code.value) if hardened.decision.reason_code.value in ReasonCode._value2member_map_ else ReasonCode.POLICY_DENIED,
+            proposal_id=proposal.proposal_id,
+            agent_id=proposal.agent_id,
+            tenant_id=proposal.tenant_id,
+            action=proposal.action,
+            resource=proposal.resource,
+            policy_id=hardened.decision.policy_id,
+            policy_version=hardened.decision.policy_version,
+            explanation=hardened.decision.explanation,
+            risk_score=hardened.decision.risk_score,
+        )
+    intent = state.engine.create_intent(proposal, finance_decision)
     if intent is not None:
         state.intents[intent.intent_id] = intent
-    return AdmissionResponse(decision=decision, intent=intent)
+        state.admissions[intent.intent_id] = hardened
+    return AdmissionResponse(
+        decision=finance_decision,
+        intent=intent,
+        approval_id=hardened.approval.approval_id if hardened.approval else None,
+    )
+
+
+@app.post("/v1/approvals/{approval_id}/decide", tags=["approvals"])
+def decide_approval(
+    approval_id: UUID,
+    payload: ApprovalDecisionInput,
+    principal: Annotated[AuthenticatedPrincipal, Depends(authenticate)],
+) -> dict[str, Any]:
+    if "approval:decide" not in principal.scopes:
+        raise HTTPException(status_code=403, detail={"code": "APPROVAL_SCOPE_REQUIRED"})
+    if payload.approver_id == principal.agent_id:
+        raise HTTPException(status_code=403, detail={"code": "REQUESTER_CANNOT_APPROVE"})
+    try:
+        approval = state.basalt_os.decide_approval(approval_id, payload.approver_id, payload.approve, payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": "APPROVAL_REJECTED", "message": str(exc)}) from exc
+    return {
+        "approval_id": str(approval.approval_id),
+        "action_request_id": str(approval.action_request_id),
+        "status": approval.status.value,
+        "approver_id": approval.approver_id,
+        "reason": approval.reason,
+    }
+
+
+@app.post("/v1/intents/{intent_id}/execute", tags=["execution"])
+def execute_intent(
+    intent_id: UUID,
+    principal: Annotated[AuthenticatedPrincipal, Depends(authenticate)],
+) -> dict[str, Any]:
+    if "intent:execute" not in principal.scopes:
+        raise HTTPException(status_code=403, detail={"code": "EXECUTION_SCOPE_REQUIRED"})
+    admission = state.admissions.get(intent_id)
+    if admission is None:
+        raise HTTPException(status_code=404, detail={"code": "ADMISSION_NOT_FOUND"})
+    outcome = state.basalt_os.execute(admission)  # type: ignore[arg-type]
+    return {
+        "status": outcome.status,
+        "payment": outcome.result.__dict__ if outcome.result else None,
+        "verification": outcome.verification.__dict__ if outcome.verification else None,
+        "evidence": outcome.evidence.__dict__,
+    }
 
 
 @app.get("/v1/intents/{intent_id}", response_model=ExecutionIntent, tags=["governance"])

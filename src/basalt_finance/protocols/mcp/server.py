@@ -44,10 +44,16 @@ if mcp is not None:
             correlation_id=correlation_id,
             parameters=parameters or {},
         )
+        hardened = state.basalt_os.admit_authenticated(proposal, agent_id, tenant_id)
         decision = state.engine.evaluate(proposal, tenant_id)
         intent = state.engine.create_intent(proposal, decision)
         return {
             "decision": decision.model_dump(mode="json"),
+            "hardened_decision": {
+                "decision": hardened.decision.decision.value,
+                "reason_code": hardened.decision.reason_code.value,
+                "lifecycle_state": hardened.lifecycle.state.value,
+            },
             "intent": intent.model_dump(mode="json") if intent else None,
         }
 

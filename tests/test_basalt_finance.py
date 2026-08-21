@@ -72,3 +72,26 @@ def test_agent_card_is_discoverable() -> None:
     response = TestClient(app).get("/.well-known/agent-card.json")
     assert response.status_code == 200
     assert response.json()["name"] == "Basalt Finance Governance Agent"
+
+
+def test_http_approval_and_controlled_execution_path() -> None:
+    client = TestClient(app)
+    candidate = proposal("100001").model_dump(mode="json")
+    admitted = client.post("/v1/proposals/admit", headers=TOKEN_HEADERS, json=candidate)
+    assert admitted.status_code == 200
+    admission = admitted.json()
+    assert admission["decision"]["decision"] == "REQUIRE_APPROVAL"
+    approval_id = admission["approval_id"]
+    self_approval = client.post(
+        f"/v1/approvals/{approval_id}/decide",
+        headers=TOKEN_HEADERS,
+        json={"approver_id": "treasury-agent-042", "approve": True, "reason": "not allowed"},
+    )
+    assert self_approval.status_code == 403
+    approved = client.post(
+        f"/v1/approvals/{approval_id}/decide",
+        headers=TOKEN_HEADERS,
+        json={"approver_id": "operator-001", "approve": True, "reason": "independent dual-control approval"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "APPROVED"

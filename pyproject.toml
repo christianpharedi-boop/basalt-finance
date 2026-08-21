@@ -44,5 +44,5 @@ python_version = "3.11"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["vaulteq.*", "zeroclose.*"]
+module = ["basalt.*", "vaulteq.*", "zeroclose.*"]
 ignore_missing_imports = true

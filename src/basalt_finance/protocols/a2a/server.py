@@ -59,6 +59,7 @@ def send_message(payload: SendMessageRequest) -> A2ATask:
     if structured is not None and structured.get("type") == "financial_proposal":
         try:
             proposal = AgentProposal.model_validate(structured["proposal"])
+            hardened = state.basalt_os.admit_authenticated(proposal, proposal.agent_id, task.tenant_id)
             decision = state.engine.evaluate(proposal, task.tenant_id)
             intent = state.engine.create_intent(proposal, decision)
             task = task.model_copy(
@@ -66,11 +67,16 @@ def send_message(payload: SendMessageRequest) -> A2ATask:
                     "state": A2ATaskState.COMPLETED,
                     "output": {
                         "decision": decision.model_dump(mode="json"),
+                        "hardened_decision": {
+                            "decision": hardened.decision.decision.value,
+                            "reason_code": hardened.decision.reason_code.value,
+                            "lifecycle_state": hardened.lifecycle.state.value,
+                        },
                         "intent": intent.model_dump(mode="json") if intent else None,
                     },
                 }
             )
-        except ValidationError as exc:
+        except (ValidationError, PermissionError) as exc:
             task = task.model_copy(update={"state": A2ATaskState.FAILED, "error": str(exc)})
     else:
         task = task.model_copy(
