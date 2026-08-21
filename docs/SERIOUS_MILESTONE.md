@@ -1,5 +1,7 @@
 # Basalt Finance Serious Milestone
 
+**Author:** Basie Pharedi
+
 ## What changed
 
 Basalt Finance now uses the refreshed Basalt OS package as an active control-plane dependency rather than only mirroring its concepts. The bridge is implemented in `basalt_finance.integrations.basalt_os.BasaltOSControlPlane`.

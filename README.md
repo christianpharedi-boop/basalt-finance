@@ -1,5 +1,7 @@
 # Basalt Finance
 
+**Author:** Basie Pharedi
+
 Basalt Finance is a governed intelligent financial infrastructure platform for South Africa and the wider African market. It combines the control-plane principles of **Basalt OS** with deterministic financial computation from **VaultEq**, policy-driven treasury orchestration from **ZeroClose**, auditable operational workflows from **SureClose**, and provenance and evidence patterns from **Cerevia**, **CoreSignal**, **OysterBox**, and **Funeral OS**.
 
 > Intelligent agents may propose. Basalt Finance decides, controls, verifies, and records.
