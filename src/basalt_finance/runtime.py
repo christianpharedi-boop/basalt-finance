@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from uuid import UUID
 
 from basalt_finance.governance.contracts import ExecutionIntent
 from basalt_finance.governance.engine import GovernanceEngine, Policy, ToolRegistry
+from basalt_finance.integrations.adapters import VaultEqAdapter, ZeroCloseAdapter
 
 
 class RuntimeState:
@@ -25,6 +27,13 @@ class RuntimeState:
             self.registry,
         )
         self.intents: dict[UUID, ExecutionIntent] = {}
+        self.ledger: VaultEqAdapter | None = None
+        self.treasury: ZeroCloseAdapter | None = None
+        if os.getenv("BASALT_FINANCE_ENABLE_REPOSITORY_INTEGRATIONS", "false").lower() == "true":
+            organization_id = os.getenv("BASALT_FINANCE_ORGANIZATION_ID", "example-bank")
+            ledger_db = os.getenv("BASALT_FINANCE_LEDGER_DB", "basalt-finance.db")
+            self.ledger = VaultEqAdapter(organization_id, ledger_db)
+            self.treasury = ZeroCloseAdapter(organization_id, ledger=self.ledger)
 
 
 state = RuntimeState()

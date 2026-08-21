@@ -46,6 +46,19 @@ The API exposes OpenAPI documentation at `/docs`, an A2A agent card at `/.well-k
 
 The development bearer token is `basalt-finance-development-token`. It is a local-development fixture only and must be replaced by an injected enterprise identity adapter before deployment.
 
+## Repository integrations
+
+The VaultEq and ZeroClose integrations are opt-in. Enable them only in an environment with the user’s packages installed and a durable ledger path configured:
+
+```bash
+export BASALT_FINANCE_ENABLE_REPOSITORY_INTEGRATIONS=true
+export BASALT_FINANCE_ORGANIZATION_ID=example-bank
+export BASALT_FINANCE_LEDGER_DB=/var/lib/basalt-finance/ledger.db
+uvicorn basalt_finance.api.app:app
+```
+
+After a proposal is admitted and an `ExecutionIntent` is created, an authenticated caller can invoke `POST /v1/intents/{intent_id}/settle` with an `Idempotency-Key`. Basalt Finance then posts the controlled intent through the VaultEq adapter, records the treasury workflow through ZeroClose, and returns independent ledger and settlement verification results. This endpoint is deliberately separate from proposal admission so an agent cannot silently convert an allowed proposal into settlement.
+
 ## Protocol direction
 
 The MCP surface will follow the official MCP model of tools, resources, prompts, consent, and authorization. The A2A surface will align with the current A2A 1.0 data model and task semantics, including agent cards, messages, tasks, artifacts, streaming, and future push notifications. Neither protocol is allowed to bypass Basalt Finance governance.

@@ -111,6 +111,35 @@ def get_intent(intent_id: UUID, _: Annotated[AuthenticatedPrincipal, Depends(aut
     return intent
 
 
+@app.post("/v1/intents/{intent_id}/settle", tags=["settlement"])
+def settle_intent(
+    intent_id: UUID,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    _: Annotated[AuthenticatedPrincipal, Depends(authenticate)],
+) -> dict[str, Any]:
+    intent = state.intents.get(intent_id)
+    if intent is None:
+        raise HTTPException(status_code=404, detail={"code": "INTENT_NOT_FOUND"})
+    if state.ledger is None or state.treasury is None:
+        raise HTTPException(status_code=503, detail={"code": "REPOSITORY_INTEGRATIONS_DISABLED"})
+    ledger_result = state.ledger.post_controlled_intent(intent, idempotency_key)
+    settlement = state.treasury.create_settlement_instruction(intent, idempotency_key)
+    return {
+        "status": "SETTLEMENT_RECORDED",
+        "intent_id": str(intent_id),
+        "ledger": {
+            "journal_entry_id": ledger_result.journal_entry_id,
+            "status": ledger_result.status,
+            "verified": state.ledger.verify(ledger_result.journal_entry_id),
+        },
+        "treasury": {
+            "instruction_id": str(settlement.instruction_id),
+            "status": settlement.status,
+            "verified": state.treasury.verify_settlement(settlement.instruction_id),
+        },
+    }
+
+
 def main() -> None:
     import uvicorn
 
