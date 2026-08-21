@@ -157,12 +157,12 @@ def decide_approval(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"code": "APPROVAL_REJECTED", "message": str(exc)}) from exc
     intent_id: UUID | None = None
+    proposal_id = state.pending_by_approval.pop(approval_id, None)
     if approval.status.value == "APPROVED":
-        proposal_id = state.pending_by_approval.pop(approval_id, None)
         admission = state.admissions.get(proposal_id) if proposal_id else None
         if admission is not None:
             assert proposal_id is not None
-            authorized = state.basalt_os.authorize_after_approval(admission)
+            authorized = state.basalt_os.authorize_after_approval(admission, approval)
             intent = ExecutionIntent(
                 proposal_id=proposal_id,
                 action=authorized.request.action,

@@ -50,3 +50,15 @@ def test_basalt_os_rejects_tenant_mismatch() -> None:
     with pytest.raises(PermissionError, match="does not match"):
         control.admit(mismatched, "basalt-finance-development-token")
     control.close()
+
+
+def test_authorize_after_approval_uses_authoritative_decision_record() -> None:
+    control = BasaltOSControlPlane()
+    admission = control.admit(proposal("100001"), "basalt-finance-development-token")
+    assert admission.approval is not None
+    approval = control.decide_approval(admission.approval.approval_id, "operator-002", True, "dual-control")
+    promoted = control.authorize_after_approval(admission, approval)
+    assert promoted.approval is approval
+    assert promoted.decision.decision.value == "ALLOW"
+    assert control.execute(promoted).status == "VERIFIED"
+    control.close()
